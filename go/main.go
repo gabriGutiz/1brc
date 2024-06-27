@@ -17,6 +17,7 @@ import (
 )
 
 var BUFFER_CHUNK_SIZE = 64 * 1024 * 1024
+var N_CONSUMERS = runtime.NumCPU()
 
 var cpuProfile = flag.String("cpuprofile", "cpu.prof", "write cpu profile to `file`")
 var memProfile = flag.String("memprofile", "mem.prof", "write memory profile to `file`")
@@ -42,27 +43,19 @@ func logDebug(message string, args ...interface{}) {
 }
 
 func customByteToInt(byteArr []byte) (result int) {
-    negative := false
-
+    signal := 1
     if byteArr[0] == '-' {
         byteArr = byteArr[1:]
-        negative = true
+        signal = -1
     }
 
-    multiplier := 1
-    for i := len(byteArr) - 1; i >= 0; i-- {
-        if byteArr[i] == '.' {
-            continue
-        } else {
-            result += int(byteArr[i] - '0') * multiplier
-            multiplier *= 10
-        }
+    if len(byteArr) == 3 {
+        result += int(byteArr[0] - '0') * 10 + int(byteArr[2] - '0')
+    } else {
+        result += int(byteArr[0] - '0') * 100 + int(byteArr[1] - '0') * 10 + int(byteArr[3] - '0')
     }
 
-    if negative {
-        return result * -1
-    }
-    return
+    return result * signal
 }
 
 func chunkProducer(file os.File, chunkChan chan []byte) {
@@ -144,13 +137,11 @@ func process() string {
     }
     defer file.Close()
 
-    cpus := runtime.NumCPU()
-
-    chunksChan := make(chan []byte, cpus - 1)
+    chunksChan := make(chan []byte, N_CONSUMERS - 1)
     m := make(map[string]*City)
     var wg sync.WaitGroup
 
-    for i := 0; i < cpus - 1; i++ {
+    for i := 0; i < N_CONSUMERS - 1; i++ {
         wg.Add(1)
         go func() {
             for chunk := range chunksChan {
