@@ -89,6 +89,7 @@ func chunkConsumer(chunk []byte, cities *map[string]*City) {
             temp, err := strconv.ParseFloat(string(chunk[lastIndex:i]), 64)
             if err == nil {
                 logDebug("Temperature: %f", temp)
+
                 c, ok := (*cities)[cityName]
                 if ok {
                     if temp < c.minTemp {
@@ -129,14 +130,16 @@ func process() string {
     m := make(map[string]*City)
     var wg sync.WaitGroup
 
-    wg.Add(1)
-    go func() {
-        for chunk := range chunksChan {
-            logDebug("Processing chunk: %s", string(chunk))
-            chunkConsumer(chunk, &m)
-        }
-        wg.Done()
-    }()
+    for i := 0; i < cpus - 1; i++ {
+        wg.Add(1)
+        go func() {
+            for chunk := range chunksChan {
+                logDebug("Processing chunk: %s", string(chunk))
+                chunkConsumer(chunk, &m)
+            }
+            wg.Done()
+        }()
+    }
     go chunkProducer(*file, chunksChan)
     wg.Wait()
 
