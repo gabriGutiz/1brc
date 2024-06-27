@@ -24,7 +24,7 @@ var memProfile = flag.String("memprofile", "mem.prof", "write memory profile to 
 var input = flag.String("input", "", "path to the input file")
 var debug = flag.Bool("debug", false, "enable debug mode")
 
-type City struct {
+type temperatureInfo struct {
     minTemp, maxTemp, totalTemp, total int
 }
 
@@ -90,7 +90,7 @@ func chunkProducer(file os.File, chunkChan chan []byte) {
     close(chunkChan)
 }
 
-func chunkConsumer(chunk []byte, cities *map[string]*City) {
+func chunkConsumer(chunk []byte, cities *map[string]*temperatureInfo) {
     lastIndex := 0
     var cityName string
 
@@ -115,7 +115,7 @@ func chunkConsumer(chunk []byte, cities *map[string]*City) {
                 c.totalTemp += temp
                 c.total++
             } else {
-                (*cities)[cityName] = &City{
+                (*cities)[cityName] = &temperatureInfo{
                     minTemp: temp,
                     maxTemp: temp,
                     totalTemp: temp,
@@ -138,7 +138,7 @@ func process() string {
     defer file.Close()
 
     chunksChan := make(chan []byte, N_CONSUMERS - 1)
-    m := make(map[string]*City)
+    m := make(map[string]*temperatureInfo)
     var wg sync.WaitGroup
 
     for i := 0; i < N_CONSUMERS - 1; i++ {
