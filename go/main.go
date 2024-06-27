@@ -60,11 +60,10 @@ func customByteToInt(byteArr []byte) (result int) {
 
 func chunkProducer(file os.File, chunkChan chan []byte) {
     buf := make([]byte, BUFFER_CHUNK_SIZE)
-    left := make([]byte, 0, BUFFER_CHUNK_SIZE)
     leftLen := 0
 
     for {
-        total, err := file.Read(buf)
+        total, err := file.Read(buf[leftLen:])
         if err != nil {
             if errors.Is(err, io.EOF) {
                 break
@@ -72,19 +71,14 @@ func chunkProducer(file os.File, chunkChan chan []byte) {
             panic(err)
         }
 
-        buf = buf[:total]
+        toSend := buf[:leftLen + total]
 
         lastNewLine := bytes.LastIndexByte(buf, '\n')
 
-        send := make([]byte, lastNewLine + leftLen + 1)
-        copy(send, left[:leftLen])
-        copy(send[leftLen:], buf[:lastNewLine + 1])
+        buf = make([]byte, BUFFER_CHUNK_SIZE)
+        leftLen = copy(buf, toSend[lastNewLine+1:])
 
-        leftLen = total - lastNewLine - 1
-        left = make([]byte, leftLen)
-        copy(left, buf[lastNewLine+1:])
-
-        chunkChan <- send
+        chunkChan <- toSend[:lastNewLine+1]
     }
 
     close(chunkChan)
@@ -167,7 +161,7 @@ func process() string {
 
         if ok {
             avgTemp := round(float64(c.totalTemp) / 10.0 / float64(c.total))
-            sb.WriteString(fmt.Sprintf("%s=%.1f/%.1f/%.1f", k, float64(c.minTemp)/10.0, avgTemp, float64(c.maxTemp)/10.0))
+            sb.WriteString(fmt.Sprintf("%s=%.1f/%.1f/%.1f", k, float32(c.minTemp)/10.0, avgTemp, float32(c.maxTemp)/10.0))
             sb.WriteString(", ")
         }
     }
