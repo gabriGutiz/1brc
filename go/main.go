@@ -85,38 +85,39 @@ func chunkProducer(file os.File, chunkChan chan []byte) {
 }
 
 func chunkConsumer(chunk []byte, cities *map[string]*temperatureInfo) {
-    lastIndex := 0
     var cityName string
+    chunkLen := len(chunk)
+    lastIndex := 0
+    endNameIndex := 0
 
-    for i, b := range chunk {
-        switch b {
-        case ';':
-            cityName = string(chunk[lastIndex:i])
-            //logDebug("Index: %d | City name: %s", i, cityName)
-            lastIndex = i + 1
-        case '\n':
-            temp := customByteToInt(chunk[lastIndex:i])
-            //logDebug("Temperature: %d", temp)
+    for lastIndex < chunkLen {
+        endNameIndex = bytes.IndexByte(chunk[lastIndex:], ';') + lastIndex
 
-            c, ok := (*cities)[cityName]
-            if ok {
-                if temp < c.minTemp {
-                    c.minTemp = temp
-                } else if temp > c.maxTemp {
-                    c.maxTemp = temp
-                }
+        cityName = string(chunk[lastIndex:endNameIndex])
+        endNameIndex++
 
-                c.totalTemp += temp
-                c.total++
-            } else {
-                (*cities)[cityName] = &temperatureInfo{
-                    minTemp: temp,
-                    maxTemp: temp,
-                    totalTemp: temp,
-                    total: 1,
-                }
+        lastIndex = bytes.IndexByte(chunk[endNameIndex:], '\n') + endNameIndex
+
+        temp := customByteToInt(chunk[endNameIndex:lastIndex])
+        lastIndex++
+
+        c, ok := (*cities)[cityName]
+        if ok {
+            if temp < c.minTemp {
+                c.minTemp = temp
+            } else if temp > c.maxTemp {
+                c.maxTemp = temp
             }
-            lastIndex = i + 1
+
+            c.totalTemp += temp
+            c.total++
+        } else {
+            (*cities)[cityName] = &temperatureInfo{
+                minTemp: temp,
+                maxTemp: temp,
+                totalTemp: temp,
+                total: 1,
+            }
         }
     }
 }
