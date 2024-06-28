@@ -19,8 +19,8 @@ import (
 var BUFFER_CHUNK_SIZE = 64 * 1024 * 1024
 var N_CONSUMERS = runtime.NumCPU()
 
-var cpuProfile = flag.String("cpuprofile", "cpu.prof", "write cpu profile to `file`")
-var memProfile = flag.String("memprofile", "mem.prof", "write memory profile to `file`")
+var cpuProfile = flag.String("cpuprofile", "", "write cpu profile to `file`")
+var memProfile = flag.String("memprofile", "", "write memory profile to `file`")
 var input = flag.String("input", "", "path to the input file")
 var debug = flag.Bool("debug", false, "enable debug mode")
 
@@ -58,7 +58,7 @@ func customByteToInt(byteArr []byte) (result int) {
     return result * signal
 }
 
-func chunkProducer(file os.File, chunkChan chan []byte) {
+func chunkProducer(file os.File, chunkChan chan []byte, mapsChan chan map[string]*temperatureInfo, wg *sync.WaitGroup) {
     buf := make([]byte, BUFFER_CHUNK_SIZE)
     leftLen := 0
 
@@ -82,16 +82,18 @@ func chunkProducer(file os.File, chunkChan chan []byte) {
     }
 
     close(chunkChan)
+    wg.Wait()
+    close(mapsChan)
 }
 
-func chunkConsumer(chunk []byte, cities *map[string]*temperatureInfo) {
+func chunkConsumer(chunk []byte, mapsChan chan map[string]*temperatureInfo) {
+    tempInfoToSend := make(map[string]*temperatureInfo)
     var cityName string
     chunkLen := len(chunk)
     lastIndex := 0
-    endNameIndex := 0
 
     for lastIndex < chunkLen {
-        endNameIndex = bytes.IndexByte(chunk[lastIndex:], ';') + lastIndex
+        endNameIndex := bytes.IndexByte(chunk[lastIndex:], ';') + lastIndex
 
         cityName = string(chunk[lastIndex:endNameIndex])
         endNameIndex++
@@ -101,7 +103,7 @@ func chunkConsumer(chunk []byte, cities *map[string]*temperatureInfo) {
         temp := customByteToInt(chunk[endNameIndex:lastIndex])
         lastIndex++
 
-        c, ok := (*cities)[cityName]
+        c, ok := tempInfoToSend[cityName]
         if ok {
             if temp < c.minTemp {
                 c.minTemp = temp
@@ -112,7 +114,7 @@ func chunkConsumer(chunk []byte, cities *map[string]*temperatureInfo) {
             c.totalTemp += temp
             c.total++
         } else {
-            (*cities)[cityName] = &temperatureInfo{
+            tempInfoToSend[cityName] = &temperatureInfo{
                 minTemp: temp,
                 maxTemp: temp,
                 totalTemp: temp,
@@ -120,6 +122,7 @@ func chunkConsumer(chunk []byte, cities *map[string]*temperatureInfo) {
             }
         }
     }
+    mapsChan <- tempInfoToSend
 }
 
 func process() string {
@@ -133,7 +136,7 @@ func process() string {
     defer file.Close()
 
     chunksChan := make(chan []byte, N_CONSUMERS - 1)
-    m := make(map[string]*temperatureInfo)
+    mapsChan := make(chan map[string]*temperatureInfo)
     var wg sync.WaitGroup
 
     for i := 0; i < N_CONSUMERS - 1; i++ {
@@ -141,17 +144,38 @@ func process() string {
         go func() {
             for chunk := range chunksChan {
                 //logDebug("Processing chunk: %s", string(chunk))
-                chunkConsumer(chunk, &m)
+                chunkConsumer(chunk, mapsChan)
             }
             wg.Done()
         }()
     }
-    go chunkProducer(*file, chunksChan)
-    wg.Wait()
+    go chunkProducer(*file, chunksChan, mapsChan, &wg)
 
-    keys := make([]string, 0, len(m))
-    for key := range m {
-        keys = append(keys, key)
+    m := make(map[string]*temperatureInfo)
+    for cityMap := range mapsChan {
+        for i, val := range cityMap {
+            c, ok := m[i]
+
+            if ok {
+                if val.minTemp < c.minTemp {
+                    c.minTemp = val.minTemp
+                }
+                if val.maxTemp > c.maxTemp {
+                    c.maxTemp = val.maxTemp
+                }
+
+                c.totalTemp += val.totalTemp
+                c.total += val.total
+            } else {
+                m[i] = val
+            }
+        }
+    }
+
+
+    keys := make([]string, len(m))
+    for k := range m {
+        keys = append(keys, k)
     }
     sort.Strings(keys)
 
