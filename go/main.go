@@ -16,7 +16,7 @@ import (
     "sync"
 )
 
-var BUFFER_CHUNK_SIZE = 64 * 1024 * 1024
+var BUFFER_CHUNK_SIZE = 2048 * 2048
 var N_CONSUMERS = runtime.NumCPU()
 
 var cpuProfile = flag.String("cpuprofile", "", "write cpu profile to `file`")
