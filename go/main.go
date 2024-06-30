@@ -24,10 +24,6 @@ var memProfile = flag.String("memprofile", "", "write memory profile to `file`")
 var input = flag.String("input", "", "path to the input file")
 var debug = flag.Bool("debug", false, "enable debug mode")
 
-type temperatureInfo struct {
-    minTemp, maxTemp, totalTemp, total int
-}
-
 func round(x float64) float64 {
 	rounded := math.Round(x * 10)
 	if rounded == -0.0 {
@@ -58,7 +54,7 @@ func customByteToInt(byteArr []byte) (result int) {
     return result * signal
 }
 
-func chunkProducer(file os.File, chunkChan chan []byte, mapsChan chan map[string]*temperatureInfo, wg *sync.WaitGroup) {
+func chunkProducer(file os.File, chunkChan chan []byte, mapsChan chan map[string]*[4]int, wg *sync.WaitGroup) {
     buf := make([]byte, BUFFER_CHUNK_SIZE)
     leftLen := 0
 
@@ -86,8 +82,8 @@ func chunkProducer(file os.File, chunkChan chan []byte, mapsChan chan map[string
     close(mapsChan)
 }
 
-func chunkConsumer(chunk []byte, mapsChan chan map[string]*temperatureInfo) {
-    tempInfoToSend := make(map[string]*temperatureInfo)
+func chunkConsumer(chunk []byte, mapsChan chan map[string]*[4]int) {
+    tempInfoToSend := make(map[string]*[4]int)
     var cityName string
     chunkLen := len(chunk)
     lastIndex := 0
@@ -105,21 +101,16 @@ func chunkConsumer(chunk []byte, mapsChan chan map[string]*temperatureInfo) {
 
         c, ok := tempInfoToSend[cityName]
         if ok {
-            if temp < c.minTemp {
-                c.minTemp = temp
-            } else if temp > c.maxTemp {
-                c.maxTemp = temp
+            if temp < c[0] {
+                c[0] = temp
+            } else if temp > c[1] {
+                c[1] = temp
             }
 
-            c.totalTemp += temp
-            c.total++
+            c[2] += temp
+            c[3]++
         } else {
-            tempInfoToSend[cityName] = &temperatureInfo{
-                minTemp: temp,
-                maxTemp: temp,
-                totalTemp: temp,
-                total: 1,
-            }
+            tempInfoToSend[cityName] = &[4]int{temp, temp, temp, 1}
         }
     }
     mapsChan <- tempInfoToSend
@@ -136,7 +127,7 @@ func process() string {
     defer file.Close()
 
     chunksChan := make(chan []byte, N_CONSUMERS - 1)
-    mapsChan := make(chan map[string]*temperatureInfo)
+    mapsChan := make(chan map[string]*[4]int)
     var wg sync.WaitGroup
 
     for i := 0; i < N_CONSUMERS - 1; i++ {
@@ -151,23 +142,23 @@ func process() string {
     }
     go chunkProducer(*file, chunksChan, mapsChan, &wg)
 
-    m := make(map[string]*temperatureInfo)
+    m := make(map[string]*[4]int)
     for cityMap := range mapsChan {
         for i, val := range cityMap {
             c, ok := m[i]
 
             if ok {
-                if val.minTemp < c.minTemp {
-                    c.minTemp = val.minTemp
+                if val[0] < c[0] {
+                    c[0] = val[0]
                 }
-                if val.maxTemp > c.maxTemp {
-                    c.maxTemp = val.maxTemp
+                if val[1] > c[1] {
+                    c[1] = val[1]
                 }
 
-                c.totalTemp += val.totalTemp
-                c.total += val.total
+                c[2] += val[2]
+                c[3] += val[3]
             } else {
-                m[i] = val
+                m[i] = &[4]int{val[0], val[1], val[2], val[3]}
             }
         }
     }
@@ -185,8 +176,8 @@ func process() string {
         c, ok := m[k]
 
         if ok {
-            avgTemp := round(float64(c.totalTemp) / 10.0 / float64(c.total))
-            sb.WriteString(fmt.Sprintf("%s=%.1f/%.1f/%.1f", k, float32(c.minTemp)/10.0, avgTemp, float32(c.maxTemp)/10.0))
+            avgTemp := round(float64(c[2]) / 10.0 / float64(c[3]))
+            sb.WriteString(fmt.Sprintf("%s=%.1f/%.1f/%.1f", k, float32(c[0])/10.0, avgTemp, float32(c[1])/10.0))
             sb.WriteString(", ")
         }
     }
