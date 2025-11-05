@@ -8,5 +8,5 @@ fi
 
 go build main.go
 
-time ./main -input $1 -cpuprofile cpu.prof
+time ./main -input $1
 
