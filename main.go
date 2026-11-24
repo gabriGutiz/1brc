@@ -16,7 +16,11 @@ import (
 	"sync"
 )
 
+// Large chunks reduce read and channel overhead while keeping enough work for
+// all consumer goroutines to run in parallel.
 var BUFFER_CHUNK_SIZE = 2048 * 2048
+
+// One CPU is left for the producer and merge loop.
 var N_CONSUMERS = runtime.NumCPU()
 
 var cpuProfile = flag.String("cpuprofile", "", "write cpu profile to `file`")
@@ -31,6 +35,9 @@ func round(x float64) float64 {
 	return rounded / 10
 }
 
+// The challenge temperatures always have one decimal place. Parsing the
+// digits directly is cheaper than allocating strings and calling a general
+// floating-point parser. The result is stored in tenths of a degree.
 func customByteToInt(byteArr []byte) (result int) {
 	signal := 1
 	if byteArr[0] == '-' {
@@ -47,6 +54,8 @@ func customByteToInt(byteArr []byte) (result int) {
 	return result * signal
 }
 
+// chunkProducer owns the input buffers. It sends only complete lines so a
+// consumer never has to coordinate with another consumer to finish a record.
 func chunkProducer(file os.File, chunkChan chan []byte, mapsChan chan map[string]*[4]int, wg *sync.WaitGroup) {
 	buf := make([]byte, BUFFER_CHUNK_SIZE)
 	leftLen := 0
@@ -64,6 +73,8 @@ func chunkProducer(file os.File, chunkChan chan []byte, mapsChan chan map[string
 
 		lastNewLine := bytes.LastIndexByte(buf, '\n')
 
+		// Allocate a new buffer because the previous buffer is now owned by a
+		// consumer through chunkChan.
 		buf = make([]byte, BUFFER_CHUNK_SIZE)
 		leftLen = copy(buf, toSend[lastNewLine+1:])
 
@@ -71,10 +82,14 @@ func chunkProducer(file os.File, chunkChan chan []byte, mapsChan chan map[string
 	}
 
 	close(chunkChan)
+	// Consumers may still be sending their final maps. Wait before closing
+	// mapsChan so the merge loop can safely receive every result.
 	wg.Wait()
 	close(mapsChan)
 }
 
+// Each consumer aggregates its entire chunk locally. The four values in the
+// array are [minimum, maximum, sum, count], all in integer tenths.
 func chunkConsumer(chunk []byte, mapsChan chan map[string]*[4]int) {
 	tempInfoToSend := make(map[string]*[4]int)
 	var cityName string
@@ -118,6 +133,7 @@ func process() string {
 	}
 	defer file.Close()
 
+	// A buffered work queue lets the producer read ahead while consumers parse.
 	chunksChan := make(chan []byte, N_CONSUMERS-1)
 	mapsChan := make(chan map[string]*[4]int)
 	var wg sync.WaitGroup
@@ -133,6 +149,7 @@ func process() string {
 	}
 	go chunkProducer(*file, chunksChan, mapsChan, &wg)
 
+	// Only this goroutine owns the final map, so merging needs no mutex.
 	m := make(map[string]*[4]int)
 	for cityMap := range mapsChan {
 		for i, val := range cityMap {
@@ -154,6 +171,7 @@ func process() string {
 		}
 	}
 
+	// Sorting is done once per distinct city, after the billion-row hot path.
 	keys := make([]string, len(m))
 	for k := range m {
 		keys = append(keys, k)
